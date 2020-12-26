@@ -1,5 +1,5 @@
-# actix-blog-app ![tests](https://github.com/nemesiscodex/actix-blog-app/workflows/tests/badge.svg)
-Blog made in actix
+# Rust-Actix-Graphql ![tests](https://github.com/lucaswilliameufrasio/rust-actix-graphql/workflows/tests/badge.svg)
+Blog made in actix following [Genus-V Programming](https://www.youtube.com/watch?v=9q4GcWbAIEM) Youtube tutorial.
 
 ## Requirements
 - Rust
