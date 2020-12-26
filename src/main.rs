@@ -7,7 +7,6 @@ use crate::config::Config;
 use crate::handlers::app_config;
 use actix_cors::Cors;
 use actix_web::{http::header, http::Method, middleware, App, HttpServer};
-use slog_scope::info;
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
