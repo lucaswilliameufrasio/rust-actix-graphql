@@ -4,12 +4,14 @@ use serde::Serialize;
 use std::fmt;
 use tokio_postgres::error::Error;
 use tokio_pg_mapper;
+use juniper::{IntoFieldError, FieldError, Value};
 
 #[derive(Debug)]
 pub enum AppErrorType {
     DbError,
     #[allow(dead_code)]
     NotFoundError,
+    InvalidField
 }
 
 #[derive(Debug)]
@@ -30,9 +32,19 @@ impl AppError {
                 error_type: AppErrorType::NotFoundError,
                 ..
             } => "The requested item was not found".to_string(),
+            AppError {
+                error_type: AppErrorType::InvalidField,
+                ..
+            } => "Invalid value provided".to_string(),
             _ => "An unexpected error has occurred".to_string(),
         }
     }
+}
+
+impl IntoFieldError for AppError {
+fn into_field_error(self) -> juniper::FieldError { 
+    FieldError::new(self.message(), Value::null())
+ }
 }
 
 impl From<PoolError> for AppError {
@@ -81,6 +93,7 @@ impl ResponseError for AppError {
         match self.error_type {
             AppErrorType::DbError => StatusCode::INTERNAL_SERVER_ERROR,
             AppErrorType::NotFoundError => StatusCode::NOT_FOUND,
+            AppErrorType::InvalidField => StatusCode::BAD_REQUEST,
         }
     }
     fn error_response(&self) -> HttpResponse {
