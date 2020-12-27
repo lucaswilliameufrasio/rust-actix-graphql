@@ -1,16 +1,29 @@
-use deadpool_postgres::{Client, Pool};
-use juniper::{EmptySubscription, FieldError, RootNode};
+use crate::{config::HashingService, errors::AppError, models::post::{CreatePost, Post}, repositories::post::{PostLoader, PostRepository}};
+use crate::{
+    models::user::{CreateUser, User},
+    repositories::user::UserRepository,
+};
+use actix_web::Result;
+use chrono::NaiveDateTime;
+use deadpool_postgres::Pool;
+use uuid::Uuid;
 use std::sync::Arc;
-use tokio_pg_mapper::FromTokioPostgresRow;
-use crate::models::user::{User, CreateUser};
-use crate::{config::HashingService ,errors::{AppError, AppErrorType}};
-use slog_scope::error;
-use tokio_postgres::error::{Error, SqlState};
+use juniper::RootNode;
 
 #[derive(Clone)]
 pub struct Context {
     pub pool: Arc<Pool>,
-    pub hashing: Arc<HashingService>
+    pub hashing: Arc<HashingService>,
+    pub post_loader: PostLoader
+}
+
+impl Context {
+    pub fn user_repository(&self) -> UserRepository {
+        UserRepository::new(self.pool.clone())
+    }
+    pub fn post_repository(&self) -> PostRepository {
+        PostRepository::new(self.pool.clone())
+    }
 }
 
 impl juniper::Context for Context {}
@@ -25,29 +38,58 @@ impl Query {
         "1.0"
     }
 
-    pub async fn users(context: &Context) -> Result<Vec<User>, FieldError> {
-        let client: Client = context.pool
-        .get()
-        .await
-        .map_err(|err| {
-            error!("Error getting parsing users. {}", err; "query" => "users");
-            err
-        })?;
+    pub async fn users(context: &Context) -> Result<Vec<User>, AppError> {
+        context.user_repository().all().await
+    }
 
-        let statement = client.prepare("select * from users").await?;
+    pub async fn user(id: Uuid, context: &Context) -> Result<User, AppError> {
+        context.user_repository().get(id).await
+    }
 
-        let users = client
-            .query(&statement, &[])
-            .await?
-            .iter()
-            .map(|row| User::from_row_ref(row))
-            .collect::<Result<Vec<User>, _>>()
-            .map_err(|err| {
-                error!("Error getting parsing users. {}", err; "query" => "users");
-                err
-            })?;
+    pub async fn posts(context: &Context) -> Result<Vec<Post>, AppError> {
+        context.post_repository().all().await
+    }
 
-        Ok(users)
+    pub async fn post(id: Uuid, context: &Context) -> Result<Post, AppError> {
+        context.post_repository().get(id).await
+    }
+}
+
+#[juniper::graphql_object(
+    Context = Context,
+)]
+impl User {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
+    pub fn username(&self) -> &str {
+        self.username.as_str()
+    }
+
+    pub fn email(&self) -> &str {
+        self.email.as_str()
+    }
+
+    pub fn bio(&self) -> Option<&str> {
+        self.bio.as_deref()
+    }
+    
+    pub fn image(&self) -> Option<&str> {
+        self.image.as_deref()
+    }
+    
+    pub fn created_at(&self) -> NaiveDateTime {
+        self.created_at
+    }
+    
+    pub fn updated_at(&self) -> NaiveDateTime {
+        self.updated_at
+    }
+
+    pub async fn posts(&self, context: &Context) -> Result<Vec<Post>, AppError> {
+        // context.post_repository().get_for_user(self.id).await
+        context.post_loader.load(self.id).await
     }
 }
 
@@ -57,63 +99,22 @@ pub struct Mutation {}
     Context = Context,
 )]
 impl Mutation {
-    async fn create_user(input: CreateUser, context: &Context) -> Result<User, FieldError> {
-        let client: Client = context.pool
-        .get()
-        .await
-        .map_err(|err| {
-            error!("Error getting parsing users. {}", err; "query" => "create_user");
-            err
-        })?;
-
-        let statement = client
-        .prepare("insert into users (username, email, password, bio, image) values ($1, $2, $3, $4, $5) returning *")
-        .await?;
-
-        let password_hash = context.hashing.hash(input.password).await?;
-
-        let user = client
-            .query(&statement, &[
-                &input.username,
-                &input.email,
-                &password_hash,
-                &input.bio,
-                &input.image,
-            ])
+    pub async fn create_user(input: CreateUser, context: &Context) -> Result<User, AppError> {
+        context
+            .user_repository()
+            .create(input, context.hashing.clone())
             .await
-            .map_err(|err: Error| {
-                let unique_error = err.code()
-                    .map(|code: &SqlState| code == &SqlState::UNIQUE_VIOLATION);
-                
-                    match unique_error {
-                        Some(true) => AppError {
-                            cause: Some(err.to_string()),
-                            message: Some("Username or email address already in use.".to_string()),
-                            error_type: AppErrorType::InvalidField
-                        },
-                        _ => AppError::from(err)
-                    }
-            })?
-            .iter()
-            .map(|row| User::from_row_ref(row))
-            .collect::<Result<Vec<User>, _>>()?
-            .pop()
-            .ok_or(AppError {
-                message: Some("Error creating User.".to_string()),
-                cause: None,
-                error_type: AppErrorType::DbError
-            })?;
-
-        Ok(user)
+    }
+    pub async fn create_post(input: CreatePost, context: &Context) -> Result<Post, AppError> {
+        context
+            .post_repository()
+            .create(input)
+            .await
     }
 }
 
-pub type Schema = RootNode<'static, Query, Mutation, EmptySubscription<Context>>;
+pub type Schema = RootNode<'static, Query, Mutation>;
 
 pub fn create_schema() -> Schema {
-    Schema::new(
-        Query {},
-        Mutation {},
-        EmptySubscription::<Context>::new(),
-    )
+    Schema::new(Query {}, Mutation {})
 }

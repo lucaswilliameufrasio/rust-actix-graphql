@@ -6,7 +6,7 @@ use tokio_postgres::error::Error;
 use tokio_pg_mapper;
 use juniper::{IntoFieldError, FieldError, Value};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AppErrorType {
     DbError,
     #[allow(dead_code)]
@@ -14,7 +14,7 @@ pub enum AppErrorType {
     InvalidField
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AppError {
     pub message: Option<String>,
     pub cause: Option<String>,

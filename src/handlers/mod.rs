@@ -5,7 +5,7 @@ use deadpool_postgres::Pool;
 use graphql::{create_schema, Context, Schema};
 use juniper::http::{graphiql::graphiql_source, GraphQLRequest};
 use std::sync::Arc;
-use crate::config::HashingService;
+use crate::{config::HashingService, repositories::post::get_posts_loader};
 
 async fn health() -> HttpResponse {
     HttpResponse::Ok().finish()
@@ -21,7 +21,7 @@ pub fn app_config(config: &mut web::ServiceConfig) {
 }
 
 async fn graphiql() -> HttpResponse {
-    let html = graphiql_source("/graphql", None);
+    let html = graphiql_source("/graphql");
 
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -36,7 +36,8 @@ async fn graphql(
 ) -> HttpResponse {
     let pool: Arc<Pool> = pool.into_inner();
     let hashing = hashing_service.into_inner();
-    let context: Context = Context { pool, hashing };
+    let post_loader = get_posts_loader(pool.clone());
+    let context: Context = Context { pool, hashing, post_loader };
 
     let res = data.execute(&schema, &context).await;
 
